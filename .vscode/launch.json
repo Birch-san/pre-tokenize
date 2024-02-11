@@ -1,0 +1,10 @@
+{
+  "configurations": [
+    {
+      "name": "Python: JSON to ragged",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "script.json_to_ragged"
+    }
+  ]
+}
