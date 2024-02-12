@@ -1,22 +1,61 @@
+from time import sleep
+from random import random
 from pathlib import Path
-from multiprocessing import Queue
+from multiprocessing import Process, Queue #JoinableQueue
 from multiprocessing.pool import ThreadPool, AsyncResult
 import fnmatch
 from os import makedirs, listdir
 import argparse
-from typing import List, Callable, Set, Dict, Any
+from typing import List, Callable, Set, Generator, BinaryIO, Dict, Any
 import re
+import numpy as np
+from numpy.typing import NDArray
+import io
 from threading import Thread
+from io import BytesIO
 import gzip
 import json
 
+# https://stackoverflow.com/a/12572031/5257399
+def stream_gzip(stream: BinaryIO) -> Generator[bytes, None, None]:
+  import zlib
+  dec = zlib.decompressobj(32 + zlib.MAX_WBITS)
+  for chunk in stream:
+    rv = dec.decompress(chunk)
+    if rv:
+      yield rv
+  if dec.unused_data:
+    # decompress and yield the remainder
+    yield dec.flush()
+
 def producer(queue: Queue, in_shard: Path) -> None:
+  import ijson.backends.yajl2_cffi as ijson
+  # jb = ijson.get_backend('yajl2_c')
+  # buffer_size=4096
+  # with io.open(str(in_shard), mode='rb', buffering=buffer_size, errors=None, closefd=True) as f:
   with gzip.GzipFile(filename=str(in_shard)) as g:
     for line in g:
       obj: Dict[str, Any] = json.loads(line)
       text: str = obj['text']
       queue.put(text)
+    # while g.readline()
+    # gstream: Iterable[bytes] = stream_gzip(f, buffer_size=buffer_size)
+    # BytesIO
+    # gzip.GzipFile(fileobj=io.BytesIO(compressed_data))
+    # g.read
+      # tups = ijson.basic_parse(g)
+      # parsed = ijson.items(tups, prefix='text')
+      # n = next(parsed)
+    pass
+  # import dask
+  # dask.config.set({'dataframe.query-planning': True})
+  # import dask.dataframe as dd
+  # from dask.dataframe.core import DataFrame
+  # df: DataFrame = dd.read_json(str(in_shard), lines=True, orient='records', compression='gzip')
+  # for samp in df.text:
+  #   queue.put(samp)
   queue.put(None)
+  # queue.task_done()
 
 def consumer_task(queue: Queue) -> None:
   print('Consumer: Running', flush=True)

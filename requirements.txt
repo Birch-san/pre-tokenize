@@ -1,3 +1,5 @@
+# dask[dataframe]
+# dask-expr
 numpy
 ijson
 cffi
