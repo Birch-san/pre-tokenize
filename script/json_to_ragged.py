@@ -33,9 +33,8 @@ def int_to_file(int_samps: Queue, in_shard: Path, slab_size: int) -> None:
   while do_task(): pass
 
   arr = arr[:ptr]
-  np.save(str(in_shard), allow_pickle=False)
-
-  print('int_to_file: Done', flush=True)
+  np.save(str(in_shard), arr, allow_pickle=False)
+  print(f'Saved {str(in_shard)}', flush=True)
 
 def jsonl_to_str(str_samps: Queue, in_shard: Path) -> None:
   with gzip.GzipFile(filename=str(in_shard)) as g:
@@ -104,23 +103,26 @@ if __name__ == '__main__':
     out_shards_unsorted: List[str] = fnmatch.filter(listdir(str(out_split_dir)), f'c4-{split}.*-of-*.npy')
     out_shards_set: Set[str] = set(out_shards_unsorted)
 
+    def convert_shard(in_shard_path: Path, out_shard_path: Path):
+      str_samps = Queue(maxsize=128)
+      int_samps = Queue(maxsize=128)
+      # https://superfastpython.com/threadpool-producer-consumer/
+      int_to_file_ = Thread(target=int_to_file, args=(int_samps, out_shard_path, args.slab_size))
+      int_to_file_.start()
+      str_to_int = Thread(target=str_to_int_manager, args=(str_samps, int_samps, args.consumer_threads))
+      str_to_int.start()
+      jsonl_to_str_ = Thread(target=jsonl_to_str, args=(str_samps, in_shard_path))
+      jsonl_to_str_.start()
+
+      str_to_int.join()
+      jsonl_to_str_.join()
+      int_samps.put(None)
+      int_to_file_.join()
+
     for in_shard in in_shards:
       shard_ix: int = get_shard_ix(in_shard)
       shard_out_name: str = f'c4-{split}.{shard_ix:05d}-of-{in_shards_total:05d}.npy'
       if shard_out_name in out_shards_set:
         pass
-      str_samps = Queue(maxsize=128)
-      int_samps = Queue(maxsize=128)
-      # https://superfastpython.com/threadpool-producer-consumer/
-      int_to_file_ = Thread(target=int_to_file, args=(int_samps, out_split_dir / shard_out_name, args.slab_size))
-      int_to_file_.start()
-      str_to_int = Thread(target=str_to_int_manager, args=(str_samps, int_samps, args.consumer_threads))
-      str_to_int.start()
-      jsonl_to_str_ = Thread(target=jsonl_to_str, args=(str_samps, args.in_dir / in_shard))
-      jsonl_to_str_.start()
-
-      int_to_file_.join()
-      str_to_int.join()
-      jsonl_to_str_.join()
-      pass
+      convert_shard(args.in_dir / in_shard, out_split_dir / shard_out_name)
     print('>main done.')
