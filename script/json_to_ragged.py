@@ -4,35 +4,81 @@ from multiprocessing.pool import ThreadPool, AsyncResult
 import fnmatch
 from os import makedirs, listdir
 import argparse
-from typing import List, Callable, Set, Dict, Any
+from typing import List, Callable, Set, Dict, Any, Optional, TYPE_CHECKING
 import re
 from threading import Thread
 import gzip
 import json
 
-def producer(queue: Queue, in_shard: Path) -> None:
+def int_to_file(int_samps: Queue, in_shard: Path, slab_size: int) -> None:
+  import numpy as np
+  from numpy.typing import NDArray
+  print('int_to_file: Running', flush=True)
+
+  arr = np.zeros((slab_size,), dtype=np.int16)
+  ptr = 0
+
+  def do_task() -> bool:
+    nonlocal ptr
+    samp: Optional[NDArray] = int_samps.get()
+    if samp is None:
+      return False
+    samp_len: int = samp.shape[-1]
+    if ptr + samp_len > slab_size:
+      raise OverflowError(f'Cannot write sample (len {samp_len}) into {slab_size / 1024**2:2f}MiB slab, with {slab_size-ptr} bytes remaining. You should increase slab size.')
+    arr[ptr:ptr+samp_len] = samp
+    ptr += samp_len
+    return True
+
+  while do_task(): pass
+
+  arr = arr[:ptr]
+  np.save(str(in_shard), allow_pickle=False)
+
+  print('int_to_file: Done', flush=True)
+
+def jsonl_to_str(str_samps: Queue, in_shard: Path) -> None:
   with gzip.GzipFile(filename=str(in_shard)) as g:
     for line in g:
       obj: Dict[str, Any] = json.loads(line)
       text: str = obj['text']
-      queue.put(text)
-  queue.put(None)
+      str_samps.put(text)
+  str_samps.put(None)
 
-def consumer_task(queue: Queue) -> None:
-  print('Consumer: Running', flush=True)
-  while True:
-    item = queue.get()
-    if item is None:
-      break
-    print(f'>got {item}', flush=True)
-  print('Consumer: Done', flush=True)
+if TYPE_CHECKING:
+  from transformers import T5TokenizerFast
+  Tokenizer = T5TokenizerFast
+else:
+  Tokenizer = Any
 
-def consumer_manager(queue: Queue, threads: int) -> None:
+def str_to_int_worker(str_samps: Queue, int_samps: Queue, tokenizer: Tokenizer) -> None:
+  from transformers.utils.generic import TensorType
+  from transformers.tokenization_utils_base import BatchEncoding
+  from numpy.typing import NDArray
+  print('str_to_int_worker: Running', flush=True)
+
+  def do_task() -> bool:
+    samp: Optional[str] = str_samps.get()
+    if samp is None:
+      return False
+    batch: BatchEncoding = tokenizer.__call__(samp, add_special_tokens=False, return_tensors=TensorType.NUMPY, return_attention_mask=False)
+    encoded: NDArray = batch['input_ids'][0]
+    del batch
+    int_samps.put(encoded)
+    del encoded
+    return True
+
+  while do_task(): pass
+  print('str_to_int_worker: Done', flush=True)
+
+def str_to_int_manager(str_samps: Queue, int_samps: Queue, threads: int) -> None:
+  from transformers import T5TokenizerFast
+  tokenizer = T5TokenizerFast.from_pretrained('google/t5-v1_1-base')
   with ThreadPool(threads) as pool:
-    _: List[AsyncResult] = [pool.apply_async(consumer_task, args=(queue,)) for _ in range(threads)]
+    _: List[AsyncResult] = [pool.apply_async(str_to_int_worker, args=(str_samps, int_samps, tokenizer)) for _ in range(threads)]
     pool.close()
     pool.join()
-  print('>consumer_manager done.')
+  print('>str_to_int_manager done.')
 
 if __name__ == '__main__':
   p = argparse.ArgumentParser(
@@ -41,6 +87,7 @@ if __name__ == '__main__':
   p.add_argument('--in-dir', type=Path, help='directory in which c4-(train|test).*-of-*.json.gz reside. download from https://huggingface.co/datasets/allenai/c4/tree/main/en')
   p.add_argument('--out-dir', default=Path('out'), type=Path, help='directory into which to output ragged arrays')
   p.add_argument('--consumer-threads', default=1, type=int, help='threads per consumer process')
+  p.add_argument('--slab-size', default=512*1024**2, type=int, help='bytes to allocate for ragged array')
   args = p.parse_args()
 
   for split in ('train', 'validation'):
@@ -62,13 +109,18 @@ if __name__ == '__main__':
       shard_out_name: str = f'c4-{split}.{shard_ix:05d}-of-{in_shards_total:05d}.npy'
       if shard_out_name in out_shards_set:
         pass
-      str_samps = Queue()
+      str_samps = Queue(maxsize=128)
+      int_samps = Queue(maxsize=128)
       # https://superfastpython.com/threadpool-producer-consumer/
-      consumer_ = Thread(target=consumer_manager, args=(str_samps, args.consumer_threads))
-      consumer_.start()
-      producer_ = Thread(target=producer, args=(str_samps, args.in_dir / in_shard,))
-      producer_.start()
-      producer_.join()
-      consumer_.join()
+      int_to_file_ = Thread(target=int_to_file, args=(int_samps, out_split_dir / shard_out_name, args.slab_size))
+      int_to_file_.start()
+      str_to_int = Thread(target=str_to_int_manager, args=(str_samps, int_samps, args.consumer_threads))
+      str_to_int.start()
+      jsonl_to_str_ = Thread(target=jsonl_to_str, args=(str_samps, args.in_dir / in_shard))
+      jsonl_to_str_.start()
+
+      int_to_file_.join()
+      str_to_int.join()
+      jsonl_to_str_.join()
       pass
     print('>main done.')
