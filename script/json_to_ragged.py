@@ -41,7 +41,7 @@ def int_to_file(int_samps: Queue, out_shard_path: Path, data_slab_size: int, ind
 
   arr = arr[:ptr]
   indices = indices[:ix_ptr]
-  
+
   np.save(str(out_shard_path), arr, allow_pickle=False)
   print(f'Saved {str(out_shard_path)}', flush=True)
 
@@ -49,13 +49,16 @@ def int_to_file(int_samps: Queue, out_shard_path: Path, data_slab_size: int, ind
   np.save(str(ix_path), indices, allow_pickle=False)
   print(f'Saved {str(ix_path)}', flush=True)
 
-def jsonl_to_str(str_samps: Queue, in_shard: Path) -> None:
+def jsonl_to_str(str_samps: Queue, in_shard: Path, consumer_threads: int) -> None:
+  print('jsonl_to_str: Running', flush=True)
   with gzip.GzipFile(filename=str(in_shard)) as g:
     for line in g:
       obj: Dict[str, Any] = json.loads(line)
       text: str = obj['text']
       str_samps.put(text)
-  str_samps.put(None)
+  for _ in range(consumer_threads):
+    str_samps.put(None)
+  print('jsonl_to_str: Done', flush=True)
 
 if TYPE_CHECKING:
   from transformers import T5TokenizerFast
@@ -85,12 +88,12 @@ def str_to_int_worker(str_samps: Queue, int_samps: Queue, tokenizer: Tokenizer) 
 
 def str_to_int_manager(str_samps: Queue, int_samps: Queue, threads: int) -> None:
   from transformers import T5TokenizerFast
-  tokenizer = T5TokenizerFast.from_pretrained('google/t5-v1_1-base')
+  tokenizer = T5TokenizerFast.from_pretrained('google/t5-v1_1-base', legacy=False)
   with ThreadPool(threads) as pool:
     _: List[AsyncResult] = [pool.apply_async(str_to_int_worker, args=(str_samps, int_samps, tokenizer)) for _ in range(threads)]
     pool.close()
     pool.join()
-  print('>str_to_int_manager done.')
+  print('>str_to_int_manager done.', flush=True)
 
 if __name__ == '__main__':
   p = argparse.ArgumentParser(
@@ -125,7 +128,7 @@ if __name__ == '__main__':
       int_to_file_.start()
       str_to_int = Thread(target=str_to_int_manager, args=(str_samps, int_samps, args.consumer_threads))
       str_to_int.start()
-      jsonl_to_str_ = Thread(target=jsonl_to_str, args=(str_samps, in_shard_path))
+      jsonl_to_str_ = Thread(target=jsonl_to_str, args=(str_samps, in_shard_path, args.consumer_threads))
       jsonl_to_str_.start()
 
       str_to_int.join()
@@ -138,5 +141,6 @@ if __name__ == '__main__':
       shard_out_name: str = f'c4-{split}.{shard_ix:05d}-of-{in_shards_total:05d}.npy'
       if shard_out_name in out_shards_set:
         pass
+      print(f'converting shard {in_shard}...')
       convert_shard(args.in_dir / in_shard, out_split_dir / shard_out_name)
     print('>main done.')
