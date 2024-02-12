@@ -4,7 +4,12 @@
       "name": "Python: JSON to ragged",
       "type": "debugpy",
       "request": "launch",
-      "module": "script.json_to_ragged"
+      "module": "script.json_to_ragged",
+      "justMyCode": false,
+      "args": [
+        "--in-dir", "/sdb/ml-data/c4/en",
+        "--out-dir", "out",
+      ]
     }
   ]
 }
