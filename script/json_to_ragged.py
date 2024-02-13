@@ -10,7 +10,7 @@ from threading import Thread
 import gzip
 import json
 
-def int_to_file(int_samps: Queue, out_shard_path: Path, data_slab_size: int, index_slab_size: int) -> None:
+def int_to_file(int_samps: Queue, out_shard_path: Path, data_slab_size: int, length_slab_size: int) -> None:
   import numpy as np
   from numpy.typing import NDArray
   print('int_to_file: Running', flush=True)
@@ -20,35 +20,35 @@ def int_to_file(int_samps: Queue, out_shard_path: Path, data_slab_size: int, ind
   arr = np.zeros((data_slab_size // bytes_per_int16,), dtype=np.int16)
   ptr = 0
   # yes there appear to be documents larger than an int16's quantity of tokens
-  indices = np.zeros((index_slab_size // bytes_per_int32,), dtype=np.int32)
-  ix_ptr = 0
+  lengths = np.zeros((length_slab_size // bytes_per_int32,), dtype=np.int32)
+  len_ptr = 0
 
   def do_task() -> bool:
-    nonlocal ptr, ix_ptr
+    nonlocal ptr, len_ptr
     samp: Optional[NDArray] = int_samps.get()
     if samp is None:
       return False
     samp_len: int = samp.shape[-1]
     if ptr + samp_len > arr.shape[-1]:
       raise OverflowError(f'Cannot write sample (len {samp_len} * item size {arr.itemsize} = {samp_len * arr.itemsize} bytes) into {arr.nbytes / 1024**2:2f}MiB slab, with {(arr.shape[-1]-ptr)*arr.itemsize} bytes remaining. You should increase data slab size.')
-    if ix_ptr + 1 > indices.shape[-1]:
-      raise OverflowError(f'Cannot write sample length ({indices.itemsize} bytes) into {indices.nbytes / 1024**2:2f}MiB slab, with {(indices.shape[-1]-ix_ptr)*indices.itemsize} bytes remaining. You should increase index slab size.')
+    if len_ptr + 1 > lengths.shape[-1]:
+      raise OverflowError(f'Cannot write sample length ({lengths.itemsize} bytes) into {lengths.nbytes / 1024**2:2f}MiB slab, with {(lengths.shape[-1]-len_ptr)*lengths.itemsize} bytes remaining. You should increase index slab size.')
     arr[ptr:ptr+samp_len] = samp
-    indices[ix_ptr] = samp_len
+    lengths[len_ptr] = samp_len
     ptr += samp_len
-    ix_ptr += 1
+    len_ptr += 1
     return True
 
   while do_task(): pass
 
   arr = arr[:ptr]
-  indices = indices[:ix_ptr]
+  lengths = lengths[:len_ptr]
 
   np.save(str(out_shard_path), arr, allow_pickle=False)
   print(f'Saved {str(out_shard_path)}', flush=True)
 
   ix_path: Path = out_shard_path.with_suffix('.index.npy')
-  np.save(str(ix_path), indices, allow_pickle=False)
+  np.save(str(ix_path), lengths, allow_pickle=False)
   print(f'Saved {str(ix_path)}', flush=True)
 
 def jsonl_to_str(str_samps: Queue, in_shard: Path, consumer_threads: int) -> None:
@@ -105,7 +105,7 @@ if __name__ == '__main__':
   p.add_argument('--out-dir', default=Path('out'), type=Path, help='directory into which to output ragged arrays')
   p.add_argument('--consumer-threads', default=1, type=int, help='threads per consumer process')
   p.add_argument('--data-slab-size', default=512*1024**2, type=int, help='bytes to allocate for ragged array data')
-  p.add_argument('--index-slab-size', default=2*1024**2, type=int, help='bytes to allocate for ragged array indices')
+  p.add_argument('--length-slab-size', default=2*1024**2, type=int, help='bytes to allocate for ragged array indices')
   args = p.parse_args()
 
   for split in ('train', 'validation'):
@@ -126,7 +126,7 @@ if __name__ == '__main__':
       str_samps = Queue(maxsize=128)
       int_samps = Queue(maxsize=128)
       # https://superfastpython.com/threadpool-producer-consumer/
-      int_to_file_ = Thread(target=int_to_file, args=(int_samps, out_shard_path, args.data_slab_size, args.index_slab_size))
+      int_to_file_ = Thread(target=int_to_file, args=(int_samps, out_shard_path, args.data_slab_size, args.length_slab_size))
       int_to_file_.start()
       str_to_int = Thread(target=str_to_int_manager, args=(str_samps, int_samps, args.consumer_threads))
       str_to_int.start()
