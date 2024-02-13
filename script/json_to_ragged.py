@@ -16,9 +16,11 @@ def int_to_file(int_samps: Queue, out_shard_path: Path, data_slab_size: int, ind
   print('int_to_file: Running', flush=True)
 
   bytes_per_int16 = np.dtype(np.int16).itemsize
+  bytes_per_int32 = np.dtype(np.int32).itemsize
   arr = np.zeros((data_slab_size // bytes_per_int16,), dtype=np.int16)
   ptr = 0
-  indices = np.zeros((index_slab_size // bytes_per_int16,), dtype=np.int16)
+  # yes there appear to be documents larger than an int16's quantity of tokens
+  indices = np.zeros((index_slab_size // bytes_per_int32,), dtype=np.int32)
   ix_ptr = 0
 
   def do_task() -> bool:
