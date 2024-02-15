@@ -102,7 +102,7 @@ if __name__ == '__main__':
   p = argparse.ArgumentParser(
     description=__doc__, formatter_class=argparse.ArgumentDefaultsHelpFormatter
   )
-  p.add_argument('--in-dir', type=Path, help='directory in which c4-(train|test).*-of-*.json.gz reside. download from https://huggingface.co/datasets/allenai/c4/tree/main/en')
+  p.add_argument('--in-dir', type=Path, help='directory in which c4-(train|validation).*-of-*.json.gz reside. download from https://huggingface.co/datasets/allenai/c4/tree/main/en')
   p.add_argument('--out-dir', default=Path('out'), type=Path, help='directory into which to output ragged arrays')
   p.add_argument('--consumer-threads', default=1, type=int, help='threads per consumer process')
   p.add_argument('--data-slab-size', default=512*1024**2, type=int, help='bytes to allocate for ragged array data')
@@ -120,7 +120,7 @@ if __name__ == '__main__':
     in_keyer: Callable[[str], int] = lambda fname: get_shard_ix(Path(fname).name)
     in_shards: List[str] = sorted(in_shards_unsorted, key=in_keyer)
 
-    out_shards_unsorted: List[str] = fnmatch.filter(listdir(str(out_split_dir)), f'c4-{split}.*-of-*.npy')
+    out_shards_unsorted: List[str] = fnmatch.filter(listdir(str(out_split_dir)), f'c4-{split}.*-of-*.data.npy')
     out_shards_set: Set[str] = set(out_shards_unsorted)
 
     def convert_shard(in_shard_path: Path, out_shard_path: Path):
