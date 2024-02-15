@@ -73,7 +73,7 @@ def str_to_int_worker(str_samps: Queue, int_samps: Queue, tokenizer: Tokenizer) 
   from transformers.utils.generic import TensorType
   from transformers.tokenization_utils_base import BatchEncoding
   from numpy.typing import NDArray
-  print('str_to_int_worker: Running', flush=True)
+  # print('str_to_int_worker: Running', flush=True)
 
   def do_task() -> bool:
     samp: Optional[str] = str_samps.get()
@@ -87,7 +87,7 @@ def str_to_int_worker(str_samps: Queue, int_samps: Queue, tokenizer: Tokenizer) 
     return True
 
   while do_task(): pass
-  print('str_to_int_worker: Done', flush=True)
+  # print('str_to_int_worker: Done', flush=True)
 
 def str_to_int_manager(str_samps: Queue, int_samps: Queue, threads: int) -> None:
   from transformers import T5TokenizerFast
