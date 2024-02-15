@@ -143,7 +143,7 @@ if __name__ == '__main__':
       shard_ix: int = get_shard_ix(in_shard)
       shard_out_name: str = f'c4-{split}.{shard_ix:05d}-of-{in_shards_total:05d}.npy'
       if shard_out_name in out_shards_set:
-        pass
+        continue
       print(f'converting shard {in_shard}...')
       convert_shard(args.in_dir / in_shard, out_split_dir / shard_out_name)
     print('>main done.')
