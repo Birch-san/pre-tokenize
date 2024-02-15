@@ -44,12 +44,13 @@ def int_to_file(int_samps: Queue, out_shard_path: Path, data_slab_size: int, len
   arr = arr[:ptr]
   lengths = lengths[:len_ptr]
 
-  np.save(str(out_shard_path), arr, allow_pickle=False)
-  print(f'Saved {str(out_shard_path)}', flush=True)
+  data_path: Path = out_shard_path.with_suffix('.data.npy')
+  np.save(str(data_path), arr, allow_pickle=False)
+  print(f'Saved {str(data_path)}', flush=True)
 
-  ix_path: Path = out_shard_path.with_suffix('.index.npy')
-  np.save(str(ix_path), lengths, allow_pickle=False)
-  print(f'Saved {str(ix_path)}', flush=True)
+  len_path: Path = out_shard_path.with_suffix('.len.npy')
+  np.save(str(len_path), lengths, allow_pickle=False)
+  print(f'Saved {str(len_path)}', flush=True)
 
 def jsonl_to_str(str_samps: Queue, in_shard: Path, consumer_threads: int) -> None:
   print('jsonl_to_str: Running', flush=True)
