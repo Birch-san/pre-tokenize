@@ -8,7 +8,18 @@
       "justMyCode": false,
       "args": [
         "--in-dir", "/sdb/ml-data/c4/en",
-        "--out-dir", "out",
+        "--out-dir", "/sdb/ml-data/c4-ragged/en",
+        "--consumer-threads", "16"
+      ]
+    },
+    {
+      "name": "Python: read ragged",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "script.read_ragged",
+      "justMyCode": false,
+      "args": [
+        "--in-dir", "/sdb/ml-data/c4-ragged/en/train",
       ]
     }
   ]
