@@ -91,7 +91,7 @@ def str_to_int_worker(str_samps: Queue, int_samps: Queue, tokenizer: Tokenizer) 
 
 def str_to_int_manager(str_samps: Queue, int_samps: Queue, threads: int) -> None:
   from transformers import T5TokenizerFast
-  tokenizer = T5TokenizerFast.from_pretrained('google/t5-v1_1-base', legacy=False)
+  tokenizer: T5TokenizerFast = T5TokenizerFast.from_pretrained('google/t5-v1_1-base', legacy=False)
   with ThreadPool(threads) as pool:
     _: List[AsyncResult] = [pool.apply_async(str_to_int_worker, args=(str_samps, int_samps, tokenizer)) for _ in range(threads)]
     pool.close()

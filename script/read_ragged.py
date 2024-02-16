@@ -54,7 +54,7 @@ def read_shard_contents(data_path: Path, tokenizer: T5TokenizerFast) -> None:
     tokens: NDArray = read_sample(data_and_ix, samp_ix)
     text: str = tokenizer.decode(tokens)
     print(f'==Sample {samp_ix}==\n{text}')
-    pass
+    pass # put your breakpoint here if you're debugging
 
 
 if __name__ == '__main__':
