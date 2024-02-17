@@ -1,6 +1,6 @@
 import argparse
 from pathlib import Path
-from typing import List, Callable, NamedTuple
+from typing import List, Callable, NamedTuple, Generator, Iterable
 import fnmatch
 import re
 from os import listdir
@@ -44,7 +44,7 @@ def locate_shards(dir: Path) -> List[str]:
   shards: List[str] = sorted(shards_unsorted, key=keyer)
   return [dir / shard for shard in shards]
 
-def read_shard_contents(data_path: Path, tokenizer: T5TokenizerFast) -> None:
+def read_shard_contents(data_path: Path) -> Generator[NDArray, None, None]:
   rarr: RaggedArray = read_file(data_path)
   data, _, indices = rarr
   data_and_ix = DataAndIx(data, indices)
@@ -52,10 +52,7 @@ def read_shard_contents(data_path: Path, tokenizer: T5TokenizerFast) -> None:
   sample_count: int = indices.shape[0]-1
   for samp_ix in range(sample_count):
     tokens: NDArray = read_sample(data_and_ix, samp_ix)
-    text: str = tokenizer.decode(tokens)
-    print(f'==Sample {samp_ix}==\n{text}')
-    pass # put your breakpoint here if you're debugging
-
+    yield tokens
 
 if __name__ == '__main__':
   p = argparse.ArgumentParser(
@@ -68,4 +65,9 @@ if __name__ == '__main__':
   tokenizer: T5TokenizerFast = T5TokenizerFast.from_pretrained('google/t5-v1_1-base', legacy=False)
 
   for shard in shards:
-    read_shard_contents(shard, tokenizer)
+    print(f'=Shard {shard}=')
+    samples: Iterable[NDArray] = read_shard_contents(shard)
+    for samp_ix, sample in enumerate(samples):
+      text: str = tokenizer.decode(sample)
+      print(f'==Sample {samp_ix}==\n{text}')
+      pass # put your breakpoint here if you're debugging
