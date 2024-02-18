@@ -21,6 +21,14 @@
       "args": [
         "--in-dir", "/sdb/ml-data/c4-ragged/en/train",
       ]
-    }
+    },
+    {
+      "name": "Python: compute input and target lengths",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "script.compute_input_and_target_lengths",
+      "justMyCode": false,
+      "args": []
+    },
   ]
 }
