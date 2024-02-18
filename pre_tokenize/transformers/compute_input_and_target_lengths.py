@@ -1,9 +1,17 @@
+from typing import NamedTuple
+
+class InputTargetLengths(NamedTuple):
+    before_mask_input_length: int
+    target_length: int
+
 # From HF transformers run_t5_mlm_flax.py
 # https://github.com/huggingface/transformers/blob/ce4fff0be7f6464d713f7ac3e0bbaafbc6959ae5/examples/flax/language-modeling/run_t5_mlm_flax.py#L256
 # Copyright 2018- The Hugging Face team. All rights reserved.
 # Apache License 2.0
 # https://github.com/huggingface/transformers/blob/ce4fff0be7f6464d713f7ac3e0bbaafbc6959ae5/LICENSE
-def compute_input_and_target_lengths(inputs_length, noise_density, mean_noise_span_length):
+# plus modifications by Alex Birch:
+# - added type hints, NamedTuple return type
+def compute_input_and_target_lengths(inputs_length: int, noise_density: float, mean_noise_span_length: float) -> InputTargetLengths:
     """This function is copy of `random_spans_helper <https://github.com/google-research/text-to-text-transfer-transformer/blob/84f8bcc14b5f2c03de51bd3587609ba8f6bbd1cd/t5/data/preprocessors.py#L2466>`__ .
 
     Training parameters to avoid padding with random_spans_noise_mask.
@@ -47,4 +55,4 @@ def compute_input_and_target_lengths(inputs_length, noise_density, mean_noise_sp
     if noise_density == 0.5 and targets_length > inputs_length:
         tokens_length -= 1
         targets_length -= 1
-    return tokens_length, targets_length
+    return InputTargetLengths(tokens_length, targets_length)
