@@ -31,6 +31,21 @@
       "args": []
     },
     {
+      "name": "Python: wrap",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "script.wrap",
+      "justMyCode": false,
+      "args": [
+        // "--in-dir", "/sdb/ml-data/c4-ragged/en/validation",
+        // "--out-dir", "/sdb/ml-data/c4-ragged-wrap-568/en/validation",
+        "--in-dir", "/sdb/ml-data/c4-ragged/en/train",
+        "--out-dir", "/sdb/ml-data/c4-ragged-wrap-568/en/train",
+        "--add-bos",
+        "--context-len", "568",
+      ]
+    },
+    {
       "name": "Python: compute packings",
       "type": "debugpy",
       "request": "launch",
