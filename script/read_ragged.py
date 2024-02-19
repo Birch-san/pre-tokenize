@@ -44,8 +44,7 @@ def locate_shards(dir: Path) -> List[str]:
   shards: List[str] = sorted(shards_unsorted, key=keyer)
   return [dir / shard for shard in shards]
 
-def read_shard_contents(data_path: Path) -> Generator[NDArray, None, None]:
-  rarr: RaggedArray = read_file(data_path)
+def read_shard_contents(rarr: RaggedArray) -> Generator[NDArray, None, None]:
   data, _, indices = rarr
   data_and_ix = DataAndIx(data, indices)
   # we could equally read sample_count from lens.shape[0], but I prefer to shorten the lifetime of arrays I'm not using
@@ -64,9 +63,10 @@ if __name__ == '__main__':
 
   tokenizer: T5TokenizerFast = T5TokenizerFast.from_pretrained('google/t5-v1_1-base', legacy=False)
 
-  for shard in shards:
-    print(f'=Shard {shard}=')
-    samples: Iterable[NDArray] = read_shard_contents(shard)
+  for data_path in shards:
+    print(f'=Shard {data_path}=')
+    rarr: RaggedArray = read_file(data_path)
+    samples: Iterable[NDArray] = read_shard_contents(rarr)
     for samp_ix, sample in enumerate(samples):
       text: str = tokenizer.decode(sample)
       print(f'==Sample {samp_ix}==\n{text}')
