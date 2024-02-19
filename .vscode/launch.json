@@ -30,5 +30,17 @@
       "justMyCode": false,
       "args": []
     },
+    {
+      "name": "Python: compute packings",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "script.compute_packings",
+      "justMyCode": false,
+      "args": [
+        "--in-dir", "/sdb/ml-data/c4-ragged/en/train",
+        "--add-bos",
+        "--context-len", "568",
+      ]
+    },
   ]
 }
