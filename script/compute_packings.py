@@ -1,6 +1,6 @@
 import argparse
 from pathlib import Path
-from typing import List, Callable, NamedTuple, Generator, Iterable
+from typing import List, Callable, NamedTuple, Generator, Set, Iterable
 import fnmatch
 import re
 from os import listdir
@@ -20,6 +20,10 @@ class RaggedArray(NamedTuple):
 class DataAndIx(NamedTuple):
   data: NDArray
   indices: NDArray
+
+class PackingAndHisto(NamedTuple):
+  packing: Packing
+  histogram: LongTensor
 
 def read_sample(rarr: DataAndIx, ix: int) -> NDArray:
   data, indices = rarr
@@ -57,56 +61,96 @@ def read_shard_contents(rarr: RaggedArray) -> Generator[NDArray, None, None]:
     tokens: NDArray = read_sample(data_and_ix, samp_ix)
     yield tokens
 
-def wrap_lengths(len_in: NDArray, context_len: int, length_slab_size: int, add_bos=False) -> NDArray:
-  bytes_per_int16 = np.dtype(np.int16).itemsize
-  len_out = np.zeros((length_slab_size // bytes_per_int16,), dtype=np.int16)
-  len_ptr = 0
-
-  sample_max_len = context_len-1 if add_bos else context_len
-  for len_ in len_in:
-    # amount of sample remaining
-    sample_len: int | NDArray = len_
-    while sample_len > sample_max_len:
-      len_out[len_ptr] = context_len
-      len_ptr += 1
-      # probably cheaper to reassign python ints than numpy array ints
-      sample_len = int(sample_len) - sample_max_len
-    len_out[len_ptr] = sample_len+1 if add_bos else sample_len
-    len_ptr += 1
-
-  len_out = len_out[:len_ptr]
-  return len_out
-
-def compute_packings(len_np: NDArray, context_len: int, device=torch.device('cpu')) -> Packing:
+def compute_packings(len_np: NDArray, context_len: int, device=torch.device('cpu')) -> PackingAndHisto:
   len_t: LongTensor = torch.as_tensor(len_np, device=device, dtype=torch.long)
   # we are not expecting any sample to be as short as 0
   assert torch.all(len_t >= 1).item()
 
   histogram: LongTensor = torch.histc(len_t, bins=context_len, min=0, max=context_len)
   packings: Packing = pack_using_nnlshp(histogram.cpu().numpy(), max_sequence_length=context_len, max_sequences_per_pack=2)
-  return packings
+  return PackingAndHisto(packings, histogram)
 
-def pack_shard(len_path: Path, context_len: int, length_slab_size: int, add_bos=False, device=torch.device('cpu')):
-  lengths: NDArray = np.load(str(len_path), allow_pickle=False)
-  wrapped_lengths: NDArray = wrap_lengths(lengths, context_len, length_slab_size, add_bos=add_bos)
-  strategy_set, strategy_repeat_count = compute_packings(wrapped_lengths, context_len, device=device)
+def pack_shard(rarr: RaggedArray, context_len: int, data_slab_size: int, length_slab_size: int, device=torch.device('cpu')):
+  in_data, lengths, indices = rarr
+  packings, _ = compute_packings(lengths, context_len, device=device)
+  strategy_set, strategy_repeat_count = packings
+  ixs_remaining: Set[int] = set()
+  # we prepend an unused 0-len set just to ensure we can 0-index into it
+  samples_by_len: List[Set[int]] = [set(), *(set() for _ in range(context_len))]
+  for ix, len_ in enumerate(lengths):
+    samples_by_len[len_].add(ix)
+    ixs_remaining.add(ix)
+
+  bytes_per_int16 = np.dtype(np.int16).itemsize
+  out_data = np.zeros((data_slab_size // bytes_per_int16,), dtype=np.int16)
+  out_data_ptr = 0
+  out_len_subsample = np.zeros((length_slab_size // bytes_per_int16,), dtype=np.int32)
+  out_len_subsample_ptr = 0
+  out_len_sample = np.zeros((length_slab_size // bytes_per_int16,), dtype=np.int32)
+  out_len_sample_ptr = 0
+
+  in_data_ptr = 0
+  for ix, len_ in enumerate(lengths):
+    cumlen = 0
+
+    strategy_ix: int = (len_ if len_ < context_len//2 else context_len-len_)-1
+    strategy: List[int] = strategy_set[strategy_ix]
+    strategy_count: int = strategy_repeat_count[strategy_ix].item()
+    assert strategy_count > 0
+    strategy_repeat_count[strategy_ix] -= 1
+
+    if ix in ixs_remaining:
+      out_data[out_data_ptr:out_data_ptr+len_] = in_data[in_data_ptr:in_data_ptr+len_]
+      ixs_remaining.remove(ix)
+      samples_by_len[len_].remove(ix)
+      out_data_ptr += len_
+      out_len_subsample[out_len_subsample_ptr] = len_
+      out_len_subsample_ptr += 1
+      cumlen += len_
+
+    # we assume max_sequences_per_pack=2
+    partner_len: int = strategy[1 if len_ < context_len//2 else 0]
+    samples_by_partner_len: Set[int] = samples_by_len[partner_len]
+    if samples_by_partner_len:
+      partner_ix: int = next(iter(samples_by_partner_len))
+      partner_ptr: int = indices[partner_ix].item()
+      partner_len_: int = lengths[partner_ix].item()
+      assert partner_len_ == partner_len_
+      out_data[out_data_ptr:out_data_ptr+partner_len_] = in_data[partner_ptr:partner_ptr+partner_len_]
+      ixs_remaining.remove(partner_ix)
+      samples_by_partner_len.remove(partner_ix)
+      out_data_ptr += partner_len_
+      out_len_subsample[out_len_subsample_ptr] = partner_len_
+      out_len_subsample_ptr += 1
+      cumlen += partner_len_
+    
+    if cumlen > 0:
+      out_len_sample[out_len_sample_ptr] = cumlen
+      out_len_sample_ptr += 1
+
+    in_data_ptr += len_
+  pass
+  
+
+
 
 if __name__ == '__main__':
   p = argparse.ArgumentParser(
     description=__doc__, formatter_class=argparse.ArgumentDefaultsHelpFormatter
   )
-  p.add_argument('--add-bos', action='store_true', help="whether to increase each sample's length by 1 to account for a BOS's being added.")
   p.add_argument('--context-len', type=int, help="sequence length into which samples will be packed")
   p.add_argument('--in-dir', type=Path, help='directory in which *.{data,len}.npy reside. download from https://huggingface.co/datasets/Birchlabs/c4-t5-ragged/tree/main/en/validation')
-  p.add_argument('--length-slab-size', default=4*1024**2, type=int, help='bytes to allocate for computing wrapped lengths')
+  p.add_argument('--data-slab-size', default=768*1024**2, type=int, help='bytes to allocate for ragged array data')
+  p.add_argument('--length-slab-size', default=4*1024**2, type=int, help='bytes to allocate for ragged array indices')
   args = p.parse_args()
   shards: List[str] = locate_shards(args.in_dir)
 
   device=torch.device('cuda')
 
   for data_path in shards:
-    len_path: Path = data_path.with_suffix('').with_suffix('.len.npy')
-    print(f'=Shard {len_path}=')
-    pack_shard(len_path, args.context_len, args.length_slab_size, add_bos=args.add_bos, device=device)
+    # len_path: Path = data_path.with_suffix('').with_suffix('.len.npy')
+    print(f'=Shard {data_path}=')
+    rarr: RaggedArray = read_file(data_path)
+    pack_shard(rarr, args.context_len, args.data_slab_size, args.length_slab_size, device=device)
     
     
